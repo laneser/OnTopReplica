@@ -76,6 +76,7 @@
             this.menuModeAllScreensToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.enableClickthroughToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.fullExitToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.colorKeyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.menuContext.SuspendLayout();
             this.menuWindows.SuspendLayout();
             this.menuOpacity.SuspendLayout();
@@ -89,6 +90,7 @@
             this.menuContextWindows,
             this.switchToWindowToolStripMenuItem,
             this.selectRegionToolStripMenuItem,
+            this.colorKeyToolStripMenuItem,
             this.advancedToolStripMenuItem,
             this.menuContextOpacity,
             this.resizeToolStripMenuItem,
@@ -144,6 +146,15 @@
             this.selectRegionToolStripMenuItem.Text = global::OnTopReplica.Strings.MenuRegion;
             this.selectRegionToolStripMenuItem.ToolTipText = global::OnTopReplica.Strings.MenuRegionTT;
             this.selectRegionToolStripMenuItem.Click += new System.EventHandler(this.Menu_Region_click);
+            // 
+            // colorKeyToolStripMenuItem
+            // 
+            this.colorKeyToolStripMenuItem.Enabled = true;
+            this.colorKeyToolStripMenuItem.Name = "colorKeyToolStripMenuItem";
+            this.colorKeyToolStripMenuItem.Size = new System.Drawing.Size(186, 22);
+            this.colorKeyToolStripMenuItem.Text = "Color Keys";
+            this.colorKeyToolStripMenuItem.ToolTipText = "Make specific colors transparent";
+            this.colorKeyToolStripMenuItem.Click += new System.EventHandler(this.Menu_ColorKey_click);
             // 
             // advancedToolStripMenuItem
             // 
@@ -596,6 +607,7 @@
         private System.Windows.Forms.ToolStripMenuItem menuModeStandardToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem menuModeFullscreenToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem menuModeAllScreensToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem colorKeyToolStripMenuItem;
     }
 }
 

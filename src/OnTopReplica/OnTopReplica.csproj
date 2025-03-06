@@ -16,7 +16,7 @@
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
     <UseWinForms>true</UseWinForms>
-    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <NoWarn>$(NoWarn);SYSLIB0003;CA1416</NoWarn>
   </PropertyGroup>
 

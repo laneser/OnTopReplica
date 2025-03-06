@@ -19,6 +19,7 @@ namespace OnTopReplica {
             bool showing = _thumbnailPanel.IsShowingThumbnail;
 
             selectRegionToolStripMenuItem.Enabled = showing;
+            colorKeyToolStripMenuItem.Enabled = showing;
             switchToWindowToolStripMenuItem.Enabled = showing;
             resizeToolStripMenuItem.Enabled = showing;
             chromeToolStripMenuItem.Checked = IsChromeVisible;
@@ -196,6 +197,13 @@ namespace OnTopReplica {
         private void Menu_Fullscreen_Mode_AllScreens_click(object sender, EventArgs e) {
             Settings.Default.SetFullscreenMode(FullscreenMode.AllScreens);
             FullscreenManager.SwitchFullscreen(FullscreenMode.AllScreens);
+        }
+
+        /// <summary>
+        /// Opens the color key panel.
+        /// </summary>
+        private void Menu_ColorKey_click(object sender, EventArgs e) {
+            SetSidePanel(new ColorKeyPanel());
         }
 
     }

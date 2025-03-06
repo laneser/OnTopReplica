@@ -6,6 +6,7 @@ using WindowsFormsAero.Dwm;
 using System.Drawing;
 using System.Windows.Forms.VisualStyles;
 using OnTopReplica.Native;
+using System.Drawing.Imaging;
 
 namespace OnTopReplica {
 
@@ -16,6 +17,12 @@ namespace OnTopReplica {
 
         //Labels
         WindowsFormsAero.ThemeLabel _labelGlass;
+
+        // Color keying
+        private ColorKeyCollection _colorKeys = new ColorKeyCollection();
+        private bool _colorKeyingEnabled = false;
+        private Bitmap _processedBitmap = null;
+        private bool _isCapturingForColorKey = false;
 
         public ThumbnailPanel() {
             InitFormComponents();
@@ -39,6 +46,24 @@ namespace OnTopReplica {
         }
 
         #region Properties and settings
+
+        /// <summary>
+        /// Gets the color key collection for chroma keying.
+        /// </summary>
+        public ColorKeyCollection ColorKeys => _colorKeys;
+
+        /// <summary>
+        /// Gets or sets whether color keying is enabled.
+        /// </summary>
+        public bool ColorKeyingEnabled {
+            get { return _colorKeyingEnabled; }
+            set {
+                if (_colorKeyingEnabled != value) {
+                    _colorKeyingEnabled = value;
+                    UpdateThubmnail();
+                }
+            }
+        }
 
         ThumbnailRegion _currentRegion;
 
@@ -175,6 +200,14 @@ namespace OnTopReplica {
             }
         }
 
+        /// <summary>
+        /// Enables color picking mode to add a color to chroma key list.
+        /// </summary>
+        public void StartColorPicking() {
+            _isCapturingForColorKey = true;
+            Cursor = Cursors.Cross;
+        }
+
         #endregion
 
         #region GUI event handling
@@ -190,7 +223,7 @@ namespace OnTopReplica {
             //Check whether this is a hit-test on "client" surface
             if (m.Msg == WM.NCHITTEST && m.Result.ToInt32() == HT.CLIENT) {
                 //Check whether clicks must be reported
-                if(!DrawMouseRegions && !ReportThumbnailClicks){
+                if(!DrawMouseRegions && !ReportThumbnailClicks && !_isCapturingForColorKey){
                     m.Result = new IntPtr(HT.TRANSPARENT);
                 }
             }
@@ -215,6 +248,12 @@ namespace OnTopReplica {
                 _thumbnail = null;
             }
 
+            // Clean up any existing processed bitmap
+            if (_processedBitmap != null) {
+                _processedBitmap.Dispose();
+                _processedBitmap = null;
+            }
+
             //Attempt to get top level Form from Control
             Form owner = this.TopLevelControl as Form;
             if (owner == null)
@@ -237,6 +276,12 @@ namespace OnTopReplica {
 
             if (_thumbnail != null && !_thumbnail.IsInvalid) {
                 _thumbnail.Close();
+            }
+
+            // Clean up processed bitmap
+            if (_processedBitmap != null) {
+                _processedBitmap.Dispose();
+                _processedBitmap = null;
             }
 
             _thumbnail = null;
@@ -281,6 +326,156 @@ namespace OnTopReplica {
                     return;
                 }
             }
+        }
+
+        /// <summary>
+        /// Captures the current thumbnail as a bitmap for color keying processing
+        /// </summary>
+        private Bitmap CaptureThumbnail() {
+            if (!IsShowingThumbnail)
+                return null;
+
+            try {
+                // Create a bitmap of the thumbnail's visible area
+                Bitmap bitmap = new Bitmap(_thumbnailSize.Width, _thumbnailSize.Height, PixelFormat.Format32bppArgb);
+                using (Graphics g = Graphics.FromImage(bitmap)) {
+                    // Create a PrintWindow to capture the window content
+                    WindowHandle currentHandle = ((MainForm)this.TopLevelControl).CurrentThumbnailWindowHandle;
+
+                    if (currentHandle != null) {
+                        Rectangle source = (_regionEnabled) ?
+                            _currentRegion.ComputeRegionRectangle(_thumbnail.GetSourceSize()) :
+                            new Rectangle(Point.Empty, _thumbnail.GetSourceSize());
+
+                        WindowPrinting.PrintWindow(currentHandle.Handle, g.GetHdc(), 0);
+                        g.ReleaseHdc();
+
+                        // If region is enabled, crop to the region
+                        if (_regionEnabled) {
+                            // Create a cropped bitmap
+                            Bitmap cropped = new Bitmap(source.Width, source.Height);
+                            using (Graphics cropG = Graphics.FromImage(cropped)) {
+                                cropG.DrawImage(bitmap,
+                                    new Rectangle(0, 0, source.Width, source.Height),
+                                    source,
+                                    GraphicsUnit.Pixel);
+                            }
+                            bitmap.Dispose();
+                            return cropped;
+                        }
+                    }
+                }
+                return bitmap;
+            }
+            catch (Exception ex) {
+                Log.WriteException("Failed to capture thumbnail", ex);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Process the captured bitmap with color keying
+        /// </summary>
+        private Bitmap ProcessWithColorKeys(Bitmap sourceBitmap) {
+            if (sourceBitmap == null || _colorKeys.ColorKeys.Count == 0)
+                return sourceBitmap;
+
+            try {
+                // Create a copy of the bitmap to process
+                Bitmap processedBitmap = new Bitmap(sourceBitmap.Width, sourceBitmap.Height, PixelFormat.Format32bppArgb);
+
+                // Lock the bitmap bits for faster processing
+                Rectangle rect = new Rectangle(0, 0, sourceBitmap.Width, sourceBitmap.Height);
+                BitmapData sourceData = sourceBitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                BitmapData processedData = processedBitmap.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+
+                // Get the address of the first line
+                IntPtr sourcePtr = sourceData.Scan0;
+                IntPtr processedPtr = processedData.Scan0;
+
+                // Declare an array to hold the bytes of the bitmap
+                int bytes = Math.Abs(sourceData.Stride) * sourceBitmap.Height;
+                byte[] sourceValues = new byte[bytes];
+                byte[] processedValues = new byte[bytes];
+
+                // Copy the RGB values into the array
+                System.Runtime.InteropServices.Marshal.Copy(sourcePtr, sourceValues, 0, bytes);
+
+                // Process pixels - check for color keys and set alpha to 0 if matched
+                for (int i = 0; i < bytes; i += 4) {
+                    Color pixelColor = Color.FromArgb(
+                        sourceValues[i + 2], // R
+                        sourceValues[i + 1], // G
+                        sourceValues[i]      // B
+                    );
+
+                    // If the color matches any of the color keys, make it transparent
+                    if (_colorKeys.IsColorMatched(pixelColor)) {
+                        // Alpha (set to 0 for transparent)
+                        processedValues[i + 3] = 0;
+                    }
+                    else {
+                        // Copy all four components (B, G, R, A)
+                        processedValues[i] = sourceValues[i];         // B
+                        processedValues[i + 1] = sourceValues[i + 1]; // G
+                        processedValues[i + 2] = sourceValues[i + 2]; // R
+                        processedValues[i + 3] = sourceValues[i + 3]; // A
+                    }
+                }
+
+                // Copy the processed values back to the bitmap
+                System.Runtime.InteropServices.Marshal.Copy(processedValues, 0, processedPtr, bytes);
+
+                // Unlock the bits
+                sourceBitmap.UnlockBits(sourceData);
+                processedBitmap.UnlockBits(processedData);
+
+                return processedBitmap;
+            }
+            catch (Exception ex) {
+                Log.WriteException("Failed to process color keying", ex);
+                return sourceBitmap;
+            }
+        }
+
+        /// <summary>
+        /// Apply color keying to the thumbnail and override the default thumbnail rendering
+        /// </summary>
+        protected override void OnPaint(PaintEventArgs e) {
+            // Apply color keying if enabled
+            if (_colorKeyingEnabled && IsShowingThumbnail && _colorKeys.ColorKeys.Count > 0) {
+                // Capture the thumbnail if we don't have a processed bitmap
+                if (_processedBitmap == null) {
+                    Bitmap captured = CaptureThumbnail();
+                    if (captured != null) {
+                        _processedBitmap = ProcessWithColorKeys(captured);
+                        captured.Dispose();
+                    }
+                }
+
+                // Draw the processed bitmap
+                if (_processedBitmap != null) {
+                    e.Graphics.DrawImage(_processedBitmap, _padWidth, _padHeight, _thumbnailSize.Width, _thumbnailSize.Height);
+                }
+            }
+
+            // Draw region indicators
+            if (_drawingRegion) {
+                //Is currently drawing, show rectangle
+                int left = Math.Min(_regionStartPoint.X, _regionLastPoint.X);
+                int right = Math.Max(_regionStartPoint.X, _regionLastPoint.X);
+                int top = Math.Min(_regionStartPoint.Y, _regionLastPoint.Y);
+                int bottom = Math.Max(_regionStartPoint.Y, _regionLastPoint.Y);
+
+                e.Graphics.DrawRectangle(RedPen, left, top, right - left, bottom - top);
+            }
+            else if (DrawMouseRegions && !_drawingSuspended) {
+                //Show cursor coordinates
+                e.Graphics.DrawLine(RedPen, new Point(0, _regionLastPoint.Y), new Point(ClientSize.Width, _regionLastPoint.Y));
+                e.Graphics.DrawLine(RedPen, new Point(_regionLastPoint.X, 0), new Point(_regionLastPoint.X, ClientSize.Height));
+            }
+
+            base.OnPaint(e);
         }
 
         #endregion
@@ -356,8 +551,66 @@ namespace OnTopReplica {
 
                 this.Invalidate();
             }
+            else if (_isCapturingForColorKey && e.Button == MouseButtons.Left) {
+                // Get the color at the clicked point
+                CaptureColorForKeying(e.Location);
+            }
 
             base.OnMouseDown(e);
+        }
+
+        /// <summary>
+        /// Captures a color for keying from the current thumbnail at the specified point
+        /// </summary>
+        private void CaptureColorForKeying(Point location) {
+            if (!IsShowingThumbnail)
+                return;
+
+            try {
+                // Capture the current thumbnail
+                using (Bitmap bitmap = CaptureThumbnail()) {
+                    if (bitmap != null) {
+                        // Adjust for padding
+                        int x = location.X - _padWidth;
+                        int y = location.Y - _padHeight;
+
+                        if (x >= 0 && x < bitmap.Width && y >= 0 && y < bitmap.Height) {
+                            // Get the color at the clicked point
+                            Color color = bitmap.GetPixel(x, y);
+
+                            // Add to color keys
+                            _colorKeys.Add(new ColorKey(color));
+
+                            // Show message
+                            MessageBox.Show(
+                                $"Added color #{color.R:X2}{color.G:X2}{color.B:X2} to chroma key list.",
+                                "Color Added",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
+
+                            // Reset cursor and flag
+                            _isCapturingForColorKey = false;
+                            Cursor = Cursors.Default;
+
+                            // Refresh the thumbnail
+                            if (_processedBitmap != null) {
+                                _processedBitmap.Dispose();
+                                _processedBitmap = null;
+                            }
+                            this.Invalidate();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) {
+                Log.WriteException("Failed to capture color", ex);
+                MessageBox.Show("Failed to capture color: " + ex.Message, "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                // Reset cursor and flag
+                _isCapturingForColorKey = false;
+                Cursor = Cursors.Default;
+            }
         }
 
         protected override void OnMouseUp(MouseEventArgs e) {
@@ -408,25 +661,6 @@ namespace OnTopReplica {
 
         readonly static Pen RedPen = new Pen(Color.FromArgb(255, Color.Red), 1.5f); //TODO: check width
 
-        protected override void OnPaint(PaintEventArgs e) {
-            if (_drawingRegion) {
-                //Is currently drawing, show rectangle
-                int left = Math.Min(_regionStartPoint.X, _regionLastPoint.X);
-                int right = Math.Max(_regionStartPoint.X, _regionLastPoint.X);
-                int top = Math.Min(_regionStartPoint.Y, _regionLastPoint.Y);
-                int bottom = Math.Max(_regionStartPoint.Y, _regionLastPoint.Y);
-
-                e.Graphics.DrawRectangle(RedPen, left, top, right - left, bottom - top);
-            }
-            else if (DrawMouseRegions && ! _drawingSuspended) {
-                //Show cursor coordinates
-                e.Graphics.DrawLine(RedPen, new Point(0, _regionLastPoint.Y), new Point(ClientSize.Width, _regionLastPoint.Y));
-                e.Graphics.DrawLine(RedPen, new Point(_regionLastPoint.X, 0), new Point(_regionLastPoint.X, ClientSize.Height));
-            }
-
-            base.OnPaint(e);
-        }
-
         #endregion
 
         #region Thumbnail clone click
@@ -438,7 +672,7 @@ namespace OnTopReplica {
                 return;
 
             //Raise clicking event to allow click forwarding
-            if (ReportThumbnailClicks) {
+            if (ReportThumbnailClicks && !_isCapturingForColorKey) {
                 OnCloneClick(ClientToThumbnail(e.Location), e.Button, false);
             }
         }
@@ -450,7 +684,7 @@ namespace OnTopReplica {
                 return;
 
             //Raise double clicking event to allow click forwarding
-            if (ReportThumbnailClicks) {
+            if (ReportThumbnailClicks && !_isCapturingForColorKey) {
                 OnCloneClick(ClientToThumbnail(e.Location), e.Button, true);
             }
         }

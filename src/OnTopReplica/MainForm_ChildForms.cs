@@ -80,6 +80,24 @@ namespace OnTopReplica {
             }
         }
 
+        /// <summary>
+        /// Returns a properly constructed SidePanel from its type.
+        /// </summary>
+        private SidePanel InstantiatePanel(Type type) {
+            if (type == typeof(SidePanels.OptionsPanel))
+                return new SidePanels.OptionsPanel();
+            else if (type == typeof(SidePanels.AboutPanel))
+                return new SidePanels.AboutPanel();
+            else if (type == typeof(SidePanels.RegionPanel))
+                return new SidePanels.RegionPanel();
+            else if (type == typeof(SidePanels.GroupSwitchPanel))
+                return new SidePanels.GroupSwitchPanel();
+            else if (type == typeof(SidePanels.ColorKeyPanel))
+                return new SidePanels.ColorKeyPanel();
+            else
+                throw new ArgumentException("SidePanel type not recognized.", "type");
+        }
+
         void SidePanel_RequestClosing(object sender, EventArgs e) {
             CloseSidePanel();
         }
